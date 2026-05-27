@@ -1,0 +1,74 @@
+name: 每日更新星座运势
+
+on:
+  schedule:
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+
+jobs:
+  update-zodiac:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+    
+    - name: 安装依赖
+      run: pip install numpy
+    
+    - name: 更新星座运势
+      run: |
+        python3 << 'PYEOF'
+import re
+import random
+from datetime import datetime
+
+today = datetime.utcnow() + __import__('datetime').timedelta(hours=8)
+date_str = today.strftime('%Y年%m月%d日')
+weekdays = ['星期一','星期二','星期三','星期四','星期五','星期六','星期日']
+weekday = weekdays[today.weekday()]
+
+zodiacs = [('白羊座','3月21日 - 4月19日'),('金牛座','4月20日 - 5月20日'),('双子座','5月21日 - 6月21日'),('巨蟹座','6月22日 - 7月22日'),('狮子座','7月23日 - 8月22日'),('处女座','8月23日 - 9月22日'),('天秤座','9月23日 - 10月23日'),('天蝎座','10月24日 - 11月22日'),('射手座','11月23日 - 12月21日'),('摩羯座','12月22日 - 1月19日'),('水瓶座','1月20日 - 2月18日'),('双鱼座','2月19日 - 3月20日')]
+
+with open('index.html','r',encoding='utf-8') as f:
+    content = f.read()
+
+random.seed(today.year * 10000 + today.month * 100 + today.day)
+new_data = 'const twelveZodiacsData = {\n'
+for i,(name,dates) in enumerate(zodiacs):
+    random.seed(today.year * 10000 + today.month * 100 + today.day + hash(name))
+    lv = ['good','normal','weak']
+    ol = random.choice(lv)
+    ll = random.choice(lv)
+    cl = random.choice(lv)
+    wl = random.choice(lv)
+    hl = random.choice(lv)
+    new_data += f'            "{name}": {{\n'
+    new_data += f'                overall: "今日运势{"良好" if ol=="good" else "一般" if ol=="normal" else "较弱"}，{"各方面都比较顺利，适合开展新计划。" if ol=="good" else "保持平常心，按部就班即可。" if ol=="normal" else "需要多加注意，谨慎行事。"}",\n'
+    new_data += f'                overallLevel: "{ol}",\n'
+    new_data += f'                love: "感情方面运势{"良好" if ll=="good" else "一般" if ll=="normal" else "较弱"}，{"双方相处融洽，沟通顺畅。" if ll=="good" else "需要多花时间经营关系。" if ll=="normal" else "容易产生误会，需要耐心沟通。"}",\n'
+    new_data += f'                loveLevel: "{ll}",\n'
+    new_data += f'                career: "事业方面运势{"良好" if cl=="good" else "一般" if cl=="normal" else "较弱"}，{"工作进展顺利，有机会获得认可。" if cl=="good" else "按计划完成工作即可。" if cl=="normal" else "工作中可能遇到挑战，需要保持专注。"}",\n'
+    new_data += f'                careerLevel: "{cl}",\n'
+    new_data += f'                wealth: "财运方面运势{"良好" if wl=="good" else "一般" if wl=="normal" else "较弱"}，{"投资理财机会不错，但需谨慎选择。" if wl=="good" else "收支平衡，保持理性消费。" if wl=="normal" else "需要控制开支，避免冲动消费。"}",\n'
+    new_data += f'                wealthLevel: "{wl}",\n'
+    new_data += f'                health: "健康方面运势{"良好" if hl=="good" else "一般" if hl=="normal" else "较弱"}，{"身体状况良好，精力充沛。" if hl=="good" else "注意劳逸结合，保持规律作息。" if hl=="normal" else "需要关注身体信号，适当休息。"}",\n'
+    new_data += f'                healthLevel: "{hl}"\n'
+    new_data += '            }' + (',' if i < 11 else '') + '\n'
+new_data += '        };'
+
+content = re.sub(r'const twelveZodiacsData = \{[\s\S]*?\};', new_data, content)
+content = re.sub(r"id='currentDate'>[^<]*运势</div>", f"id='currentDate'>{date_str} {weekday} 运势</div>", content)
+
+with open('index.html','w',encoding='utf-8') as f:
+    f.write(content)
+print(f'Updated for {date_str} {weekday}')
+PYEOF
+    
+    - name: 提交更改
+      run: |
+        git config user.name "GitHub Actions"
+        git config user.email "actions@github.com"
+        git add index.html
+        git diff --cached --quiet || git commit -m "自动更新 - $(date +'%Y-%m-%d')"
+        git push
