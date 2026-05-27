@@ -5,6 +5,9 @@ name: Zodiac Daily Update
     - cron: '0 18 * * *'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   update:
     runs-on: ubuntu-latest
@@ -14,8 +17,7 @@ jobs:
       with:
         python-version: '3.11'
     - name: Update zodiac data
-      run: |
-        python3 update_zodiac.py
+      run: python3 update_zodiac.py
     - name: Commit and push
       run: |
         git config user.name "GitHub Actions"
