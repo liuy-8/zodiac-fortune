@@ -1,8 +1,11 @@
 name: 每日更新星座运势
 
 on:
+  # 每天凌晨2点（UTC时间18:00）自动运行
   schedule:
     - cron: '0 18 * * *'
+  
+  # 允许手动触发
   workflow_dispatch:
 
 jobs:
@@ -12,63 +15,207 @@ jobs:
     steps:
     - name: 检出代码
       uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: 设置Python环境
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
     
     - name: 安装依赖
-      run: pip install numpy
-    
-    - name: 更新星座运势
       run: |
-        python3 << 'PYEOF'
-import re
+        pip install requests beautifulsoup4
+    
+    - name: 创建更新脚本
+      run: |
+        cat > update_zodiac.py << 'EOF'
+#!/usr/bin/env python3
+import json
 import random
 from datetime import datetime
 
-today = datetime.utcnow() + __import__('datetime').timedelta(hours=8)
-date_str = today.strftime('%Y年%m月%d日')
-weekdays = ['星期一','星期二','星期三','星期四','星期五','星期六','星期日']
-weekday = weekdays[today.weekday()]
+# 运势等级
+LEVELS = ['good', 'normal', 'weak']
+LEVEL_TEXTS = {
+    'good': ['良好', '不错', '顺利', '优秀'],
+    'normal': ['一般', '普通', '平稳', '尚可'],
+    'weak': ['较弱', '低迷', '不顺', '需注意']
+}
 
-zodiacs = [('白羊座','3月21日 - 4月19日'),('金牛座','4月20日 - 5月20日'),('双子座','5月21日 - 6月21日'),('巨蟹座','6月22日 - 7月22日'),('狮子座','7月23日 - 8月22日'),('处女座','8月23日 - 9月22日'),('天秤座','9月23日 - 10月23日'),('天蝎座','10月24日 - 11月22日'),('射手座','11月23日 - 12月21日'),('摩羯座','12月22日 - 1月19日'),('水瓶座','1月20日 - 2月18日'),('双鱼座','2月19日 - 3月20日')]
+# 运势领域
+AREAS = {
+    'overall': ['整体运势', '综合运势', '今日运势'],
+    'love': ['感情运势', '爱情运势', '桃花运势'],
+    'career': ['事业运势', '工作运势', '学业运势'],
+    'wealth': ['财富运势', '财运', '金钱运势'],
+    'health': ['健康运势', '身体状况', '健康指数']
+}
 
-with open('index.html','r',encoding='utf-8') as f:
-    content = f.read()
+# 12星座
+ZODIACS = [
+    "白羊座", "金牛座", "双子座", "巨蟹座",
+    "狮子座", "处女座", "天秤座", "天蝎座",
+    "射手座", "摩羯座", "水瓶座", "双鱼座"
+]
 
-random.seed(today.year * 10000 + today.month * 100 + today.day)
-new_data = 'const twelveZodiacsData = {\n'
-for i,(name,dates) in enumerate(zodiacs):
-    random.seed(today.year * 10000 + today.month * 100 + today.day + hash(name))
-    lv = ['good','normal','weak']
-    ol = random.choice(lv)
-    ll = random.choice(lv)
-    cl = random.choice(lv)
-    wl = random.choice(lv)
-    hl = random.choice(lv)
-    new_data += f'            "{name}": {{\n'
-    new_data += f'                overall: "今日运势{"良好" if ol=="good" else "一般" if ol=="normal" else "较弱"}，{"各方面都比较顺利，适合开展新计划。" if ol=="good" else "保持平常心，按部就班即可。" if ol=="normal" else "需要多加注意，谨慎行事。"}",\n'
-    new_data += f'                overallLevel: "{ol}",\n'
-    new_data += f'                love: "感情方面运势{"良好" if ll=="good" else "一般" if ll=="normal" else "较弱"}，{"双方相处融洽，沟通顺畅。" if ll=="good" else "需要多花时间经营关系。" if ll=="normal" else "容易产生误会，需要耐心沟通。"}",\n'
-    new_data += f'                loveLevel: "{ll}",\n'
-    new_data += f'                career: "事业方面运势{"良好" if cl=="good" else "一般" if cl=="normal" else "较弱"}，{"工作进展顺利，有机会获得认可。" if cl=="good" else "按计划完成工作即可。" if cl=="normal" else "工作中可能遇到挑战，需要保持专注。"}",\n'
-    new_data += f'                careerLevel: "{cl}",\n'
-    new_data += f'                wealth: "财运方面运势{"良好" if wl=="good" else "一般" if wl=="normal" else "较弱"}，{"投资理财机会不错，但需谨慎选择。" if wl=="good" else "收支平衡，保持理性消费。" if wl=="normal" else "需要控制开支，避免冲动消费。"}",\n'
-    new_data += f'                wealthLevel: "{wl}",\n'
-    new_data += f'                health: "健康方面运势{"良好" if hl=="good" else "一般" if hl=="normal" else "较弱"}，{"身体状况良好，精力充沛。" if hl=="good" else "注意劳逸结合，保持规律作息。" if hl=="normal" else "需要关注身体信号，适当休息。"}",\n'
-    new_data += f'                healthLevel: "{hl}"\n'
-    new_data += '            }' + (',' if i < 11 else '') + '\n'
-new_data += '        };'
+# 星座图标
+ICONS = {
+    "白羊座": "♈", "金牛座": "♉", "双子座": "♊", "巨蟹座": "♋",
+    "狮子座": "♌", "处女座": "♍", "天秤座": "♎", "天蝎座": "♏",
+    "射手座": "♐", "摩羯座": "♑", "水瓶座": "♒", "双鱼座": "♓"
+}
 
-content = re.sub(r'const twelveZodiacsData = \{[\s\S]*?\};', new_data, content)
-content = re.sub(r"id='currentDate'>[^<]*运势</div>", f"id='currentDate'>{date_str} {weekday} 运势</div>", content)
+# 星座日期范围
+DATES = {
+    "白羊座": "3月21日 - 4月19日",
+    "金牛座": "4月20日 - 5月20日",
+    "双子座": "5月21日 - 6月21日",
+    "巨蟹座": "6月22日 - 7月22日",
+    "狮子座": "7月23日 - 8月22日",
+    "处女座": "8月23日 - 9月22日",
+    "天秤座": "9月23日 - 10月23日",
+    "天蝎座": "10月24日 - 11月22日",
+    "射手座": "11月23日 - 12月21日",
+    "摩羯座": "12月22日 - 1月19日",
+    "水瓶座": "1月20日 - 2月18日",
+    "双鱼座": "2月19日 - 3月20日"
+}
 
-with open('index.html','w',encoding='utf-8') as f:
-    f.write(content)
-print(f'Updated for {date_str} {weekday}')
-PYEOF
+def generate_fortune_text(area, level):
+    """生成运势文本"""
+    if area == 'overall':
+        if level == 'good':
+            return f"今日运势{random.choice(LEVEL_TEXTS['good'])}，各方面都比较顺利，适合开展新计划。"
+        elif level == 'normal':
+            return f"今日运势{random.choice(LEVEL_TEXTS['normal'])}，保持平常心，按部就班即可。"
+        else:
+            return f"今日运势{random.choice(LEVEL_TEXTS['weak'])}，需要多加注意，谨慎行事。"
+    
+    elif area == 'love':
+        if level == 'good':
+            return f"感情方面运势{random.choice(LEVEL_TEXTS['good'])}，双方相处融洽，沟通顺畅。"
+        elif level == 'normal':
+            return f"感情方面运势{random.choice(LEVEL_TEXTS['normal'])}，需要多花时间经营关系。"
+        else:
+            return f"感情方面运势{random.choice(LEVEL_TEXTS['weak'])}，容易产生误会，需要耐心沟通。"
+    
+    elif area == 'career':
+        if level == 'good':
+            return f"事业方面运势{random.choice(LEVEL_TEXTS['good'])}，工作进展顺利，有机会获得认可。"
+        elif level == 'normal':
+            return f"事业方面运势{random.choice(LEVEL_TEXTS['normal'])}，按计划完成工作即可。"
+        else:
+            return f"事业方面运势{random.choice(LEVEL_TEXTS['weak'])}，工作中可能遇到挑战，需要保持专注。"
+    
+    elif area == 'wealth':
+        if level == 'good':
+            return f"财运方面运势{random.choice(LEVEL_TEXTS['good'])}，投资理财机会不错，但需谨慎选择。"
+        elif level == 'normal':
+            return f"财运方面运势{random.choice(LEVEL_TEXTS['normal'])}，收支平衡，保持理性消费。"
+        else:
+            return f"财运方面运势{random.choice(LEVEL_TEXTS['weak'])}，需要控制开支，避免冲动消费。"
+    
+    elif area == 'health':
+        if level == 'good':
+            return f"健康方面运势{random.choice(LEVEL_TEXTS['good'])}，身体状况良好，精力充沛。"
+        elif level == 'normal':
+            return f"健康方面运势{random.choice(LEVEL_TEXTS['normal'])}，注意劳逸结合，保持规律作息。"
+        else:
+            return f"健康方面运势{random.choice(LEVEL_TEXTS['weak'])}，需要关注身体信号，适当休息。"
+
+def generate_zodiac_data():
+    """生成所有星座数据"""
+    data = {}
+    today = datetime.now()
+    seed = today.year * 10000 + today.month * 100 + today.day
+    
+    for zodiac in ZODIACS:
+        # 使用日期作为随机种子，确保每天数据一致
+        random.seed(seed + hash(zodiac))
+        
+        # 生成运势等级
+        overall_level = random.choice(LEVELS)
+        love_level = random.choice(LEVELS)
+        career_level = random.choice(LEVELS)
+        wealth_level = random.choice(LEVELS)
+        health_level = random.choice(LEVELS)
+        
+        data[zodiac] = {
+            "icon": ICONS[zodiac],
+            "dates": DATES[zodiac],
+            "overall": generate_fortune_text('overall', overall_level),
+            "overallLevel": overall_level,
+            "love": generate_fortune_text('love', love_level),
+            "loveLevel": love_level,
+            "career": generate_fortune_text('career', career_level),
+            "careerLevel": career_level,
+            "wealth": generate_fortune_text('wealth', wealth_level),
+            "wealthLevel": wealth_level,
+            "health": generate_fortune_text('health', health_level),
+            "healthLevel": health_level
+        }
+    
+    return data
+
+def update_html_file():
+    """更新HTML文件中的星座数据"""
+    with open('index.html', 'r', encoding='utf-8') as f:
+        content = f.read()
+    
+    # 生成新的星座数据
+    new_data = generate_zodiac_data()
+    
+    # 找到并替换星座数据
+    import re
+    pattern = r'const twelveZodiacsData = \{[\s\S]*?\};'
+    
+    # 构建新的数据字符串
+    new_data_str = 'const twelveZodiacsData = {\n'
+    for i, (zodiac, data) in enumerate(new_data.items()):
+        new_data_str += f'            "{zodiac}": {{\n'
+        new_data_str += f'                icon: "{data["icon"]}",\n'
+        new_data_str += f'                dates: "{data["dates"]}",\n'
+        new_data_str += f'                overall: "{data["overall"]}",\n'
+        new_data_str += f'                overallLevel: "{data["overallLevel"]}",\n'
+        new_data_str += f'                love: "{data["love"]}",\n'
+        new_data_str += f'                loveLevel: "{data["loveLevel"]}",\n'
+        new_data_str += f'                career: "{data["career"]}",\n'
+        new_data_str += f'                careerLevel: "{data["careerLevel"]}",\n'
+        new_data_str += f'                wealth: "{data["wealth"]}",\n'
+        new_data_str += f'                wealthLevel: "{data["wealthLevel"]}",\n'
+        new_data_str += f'                health: "{data["health"]}",\n'
+        new_data_str += f'                healthLevel: "{data["healthLevel"]}"\n'
+        new_data_str += '            }' + (',' if i < len(new_data) - 1 else '') + '\n'
+    new_data_str += '        };'
+    
+    # 替换数据
+    new_content = re.sub(pattern, new_data_str, content)
+    
+    # 更新日期
+    today_str = today.strftime('%Y年%m月%d日 %A')
+    new_content = re.sub(r'id="currentDate".*?</div>', 
+                        f'id="currentDate">{today_str} 运势</div>', 
+                        new_content)
+    
+    with open('index.html', 'w', encoding='utf-8') as f:
+        f.write(new_content)
+    
+    print(f"✅ 已更新 {today_str} 的星座运势数据")
+
+if __name__ == '__main__':
+    today = datetime.now()
+    print(f"🔄 开始更新星座运势数据，日期：{today.strftime('%Y-%m-%d')}")
+    update_html_file()
+EOF
+        python update_zodiac.py
     
     - name: 提交更改
       run: |
-        git config user.name "GitHub Actions"
-        git config user.email "actions@github.com"
+        git config --global user.name "GitHub Actions"
+        git config --global user.email "actions@github.com"
         git add index.html
-        git diff --cached --quiet || git commit -m "自动更新 - $(date +'%Y-%m-%d')"
+        git diff --cached --quiet || git commit -m "🔄 每日更新星座运势数据 - $(date +'%Y-%m-%d')"
         git push
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
