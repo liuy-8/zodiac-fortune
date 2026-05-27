@@ -1,0 +1,10 @@
+name: 测试手动触发
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - run: echo "测试成功 - $(date)"
